@@ -1,6 +1,7 @@
 import { evaluate } from './metrics';
-import { predictKnn } from './knn';
+import { fitClassifier } from './classifiers';
 import { splitData } from './split';
+import type { AlgorithmId } from './classifierTypes';
 import type { Evaluation, Point } from './types';
 import type { Preset } from './datasets';
 
@@ -8,14 +9,20 @@ export interface ExperimentConfiguration {
   label: string;
   preset: Preset;
   points: Point[];
+  algorithm: AlgorithmId;
   k: number;
+  treeDepth?: number;
+  treeMinSamplesSplit?: number;
   splitSeed?: number;
 }
 
 export interface ScoredExperiment {
   label: string;
   preset: Preset;
+  algorithm: AlgorithmId;
   k: number;
+  treeDepth?: number;
+  treeMinSamplesSplit?: number;
   splitSeed: number;
   pointCount: number;
   trainCount: number;
@@ -35,14 +42,16 @@ export interface ExperimentComparison {
 function score(configuration: ExperimentConfiguration): ScoredExperiment {
   const splitSeed = configuration.splitSeed ?? 123;
   const split = splitData(configuration.points, splitSeed);
-  if (!Number.isInteger(configuration.k) || configuration.k < 1 || configuration.k > split.train.length) {
-    throw new Error(`k must be between 1 and ${split.train.length} for ${configuration.label}.`);
-  }
-  const predict = (point: Point) => predictKnn(point, split.train, configuration.k).label;
+  const model = fitClassifier(split.train, configuration.algorithm === 'knn'
+    ? { algorithm: 'knn', k: configuration.k }
+    : { algorithm: 'decision-tree', maxDepth: configuration.treeDepth ?? 3, minSamplesSplit: configuration.treeMinSamplesSplit ?? 2 });
+  const predict = (point: Point) => model.predict(point);
   return {
     label: configuration.label,
     preset: configuration.preset,
+    algorithm: configuration.algorithm,
     k: configuration.k,
+    ...(configuration.algorithm === 'decision-tree' ? { treeDepth: configuration.treeDepth ?? 3, treeMinSamplesSplit: configuration.treeMinSamplesSplit ?? 2 } : {}),
     splitSeed,
     pointCount: configuration.points.length,
     trainCount: split.train.length,
