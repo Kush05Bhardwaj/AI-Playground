@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, PointerEvent, KeyboardEvent } from 'react';
 import { Activity, ArrowDownRight, ArrowUpRight, BookOpen, Check, ChevronDown, CircleHelp, FlaskConical, Play, RotateCcw, Sparkles, Trash2, Undo2, Redo2, Save, FolderOpen, X, MoveUp, MoveDown, MoveLeft, MoveRight } from 'lucide-react';
 import { makeDataset, type Preset } from './ml/datasets';
-import { predictKnn } from './ml/knn';
 import { evaluate } from './ml/metrics';
 import { compareKnnConfigurations, type KnnComparison } from './ml/comparison';
 import { splitData } from './ml/split';
 import type { Label, Point } from './ml/types';
+import { classifierDefinitions, fitClassifier } from './ml/classifiers';
+import type { ClassifierConfiguration, FittedClassifier } from './ml/classifierTypes';
 import { commitHistory, createHistory, redoHistory, undoHistory } from './experiment/history';
 import type { DatasetSnapshot, HistoryState } from './experiment/history';
 import { browserStorage, clearExperiment, loadExperiment, saveExperiment } from './experiment/persistence';
@@ -15,6 +16,9 @@ import { activities, emptySignals, isActivityComplete } from './learning/activit
 import type { ActivitySignals } from './learning/activities';
 import ComparisonPanel from './components/ComparisonPanel';
 import SavedExperimentComparison from './components/SavedExperimentComparison';
+import DecisionTreeView from './components/DecisionTreeView';
+import CrossModelComparisonPanel from './components/CrossModelComparisonPanel';
+import { compareModelsOnSharedSplit, type CrossModelComparison } from './ml/crossModelComparison';
 
 const presetInfo: Record<Preset, { name: string; desc: string }> = {
   separated: { name: 'Separated groups', desc: 'A clear first experiment: nearby examples usually share a label.' },
@@ -26,13 +30,20 @@ function App() {
   const [history, setHistory] = useState<HistoryState>(() => createHistory({ preset: 'separated', points: makeDataset('separated') }));
   const { preset, points } = history.present;
   const [seed, setSeed] = useState(42);
+  const [algorithm, setAlgorithm] = useState<'knn' | 'decision-tree'>('knn');
   const [k, setK] = useState(5);
+  const [treeDepth, setTreeDepth] = useState(3);
+  const [treeMinSamples, setTreeMinSamples] = useState(2);
   const [activeLabel, setActiveLabel] = useState<Label>('A');
   const [selected, setSelected] = useState<string | null>(null);
-  const [run, setRun] = useState<{ split: ReturnType<typeof splitData>; evaluation: ReturnType<typeof evaluate>; trainingEvaluation: ReturnType<typeof evaluate>; boundary: { x: number; y: number; label: Label }[] } | null>(null);
+  const [run, setRun] = useState<{ split: ReturnType<typeof splitData>; evaluation: ReturnType<typeof evaluate>; trainingEvaluation: ReturnType<typeof evaluate>; boundary: { x: number; y: number; label: Label }[]; model: FittedClassifier } | null>(null);
+  const [trainingError, setTrainingError] = useState('');
   const [comparisonKs, setComparisonKs] = useState<[number, number]>([1, 7]);
   const [comparison, setComparison] = useState<{ result: KnnComparison; dataKey: string; ks: [number, number] } | null>(null);
   const [comparisonError, setComparisonError] = useState('');
+  const [crossValues, setCrossValues] = useState<[ClassifierConfiguration, ClassifierConfiguration]>([{ algorithm: 'knn', k: 5 }, { algorithm: 'decision-tree', maxDepth: 3, minSamplesSplit: 2 }]);
+  const [crossResult, setCrossResult] = useState<{ result: CrossModelComparison; dataKey: string; key: string } | null>(null);
+  const [crossError, setCrossError] = useState('');
   const [tab, setTab] = useState<'experiment' | 'learn'>('experiment');
   const [savedState, setSavedState] = useState<LoadResult>(() => { const storage = browserStorage(); return storage ? loadExperiment(storage) : { status: 'unavailable' }; });
   const [storageMessage, setStorageMessage] = useState('');
@@ -43,15 +54,21 @@ function App() {
   const [dragPreview, setDragPreview] = useState<{ id: string; x: number; y: number } | null>(null);
   const dragRef = useRef<{ id: string; pointerId: number } | null>(null);
   const dataKey = useMemo(() => JSON.stringify({ points, preset, seed }), [points, preset, seed]);
+  const modelConfiguration = useMemo<ClassifierConfiguration>(() => algorithm === 'knn'
+    ? { algorithm: 'knn', k }
+    : { algorithm: 'decision-tree', maxDepth: treeDepth, minSamplesSplit: treeMinSamples }, [algorithm, k, treeDepth, treeMinSamples]);
+  const modelConfigKey = JSON.stringify(modelConfiguration);
   const runDataKey = useRef('');
-  const runK = useRef(k);
+  const runConfigKey = useRef('');
   const previewChanged = dragPreview ? points.some(point => point.id === dragPreview.id && (point.x !== dragPreview.x || point.y !== dragPreview.y)) : false;
-  const stale = run !== null && (dataKey !== runDataKey.current || k !== runK.current || previewChanged);
+  const stale = run !== null && (dataKey !== runDataKey.current || modelConfigKey !== runConfigKey.current || previewChanged);
   const comparisonStale = comparison !== null && (comparison.dataKey !== dataKey || comparison.ks[0] !== comparisonKs[0] || comparison.ks[1] !== comparisonKs[1] || previewChanged);
+  const crossKey = JSON.stringify(crossValues);
+  const crossStale = crossResult !== null && (crossResult.dataKey !== dataKey || crossResult.key !== crossKey || previewChanged);
   const current = points.find(p => p.id === selected);
   const comparisonTrainCount = points.length - Math.max(1, Math.min(points.length - 1, Math.round(points.length * .25)));
   const liveSplit = useMemo(() => points.length > 1 ? splitData(points) : { train: [], test: [] }, [points]);
-  const prediction = run && !stale && current ? predictKnn(current, run.split.train, Math.min(k, run.split.train.length)) : null;
+  const explanation = run && !stale && current ? run.model.explain(current) : null;
   const counts = useMemo(() => ({ A: points.filter(p => p.label === 'A').length, B: points.filter(p => p.label === 'B').length }), [points]);
 
   useEffect(() => {
@@ -81,17 +98,21 @@ function App() {
   function choosePreset(next: Preset) { cancelDrag(); setSeed(42); editDataset({ preset: next, points: makeDataset(next, 42) }, `Loaded ${presetInfo[next].name}`); setSelected(null); }
   function train() {
     try {
-      const split = splitData(points); let safeK = Math.min(k, split.train.length); if (safeK > 1 && safeK % 2 === 0) safeK--;
-      const evaluation = evaluate(split.test, p => predictKnn(p, split.train, safeK).label);
-      const trainingEvaluation = evaluate(split.train, p => predictKnn(p, split.train, safeK).label);
+      setTrainingError('');
+      const split = splitData(points);
+      let config = modelConfiguration;
+      if (config.algorithm === 'knn') { let safeK = Math.min(config.k, split.train.length); if (safeK > 1 && safeK % 2 === 0) safeK--; config = { algorithm: 'knn', k: safeK }; }
+      const model = fitClassifier(split.train, config);
+      const evaluation = evaluate(split.test, p => model.predict(p));
+      const trainingEvaluation = evaluate(split.train, p => model.predict(p));
       const boundary: { x: number; y: number; label: Label }[] = [];
       for (let yi = 0; yi < 24; yi++) for (let xi = 0; xi < 32; xi++) {
         const x = (xi + 0.5) / 32; const y = (yi + 0.5) / 24;
-        boundary.push({ x, y, label: predictKnn({ x, y }, split.train, safeK).label });
+        boundary.push({ x, y, label: model.predict({ x, y }) });
       }
-      runDataKey.current = dataKey; runK.current = safeK; if (safeK !== k) setK(safeK); if (!split.test.some(p => p.id === selected)) setSelected(split.test[0]?.id ?? null); setRun({ split, evaluation, trainingEvaluation, boundary });
-      setActivitySignals(previous => ({ ...previous, runKs: [...previous.runKs.slice(-99), safeK], rerunAfterEdit: previous.edited }));
-    } catch { setRun(null); }
+      runDataKey.current = dataKey; runConfigKey.current = JSON.stringify(config); if (config.algorithm === 'knn' && config.k !== k) setK(config.k); if (!split.test.some(p => p.id === selected)) setSelected(split.test[0]?.id ?? null); setRun({ split, evaluation, trainingEvaluation, boundary, model });
+      setActivitySignals(previous => ({ ...previous, runKs: config.algorithm === 'knn' ? [...previous.runKs.slice(-99), config.k] : previous.runKs, runTreeDepths: config.algorithm === 'decision-tree' ? [...previous.runTreeDepths.slice(-99), config.maxDepth] : previous.runTreeDepths, rerunAfterEdit: previous.edited }));
+    } catch (error) { setRun(null); setTrainingError(error instanceof Error ? error.message : 'The model could not be trained.'); }
   }
   function compareModels() {
     try {
@@ -103,10 +124,14 @@ function App() {
       setComparisonError(error instanceof Error ? error.message : 'The comparison could not be calculated.');
     }
   }
+  function compareAcrossAlgorithms() {
+    try { setCrossResult({ result: compareModelsOnSharedSplit(points, crossValues[0], crossValues[1], 123), dataKey, key: crossKey }); setCrossError(''); }
+    catch (error) { setCrossResult(null); setCrossError(error instanceof Error ? error.message : 'The algorithm comparison could not be calculated.'); }
+  }
   function startFresh() {
     if (!window.confirm('Start fresh? This clears the current dataset and its undo history.')) return;
     cancelDrag(); const initial = { preset: 'separated' as const, points: makeDataset('separated', 42) };
-    setHistory(createHistory(initial)); setSeed(42); setK(5); setActiveLabel('A'); setRun(null); setSelected(null); setActiveActivity(null); setActivitySignals(emptySignals());
+    setHistory(createHistory(initial)); setSeed(42); setAlgorithm('knn'); setK(5); setTreeDepth(3); setTreeMinSamples(2); setActiveLabel('A'); setRun(null); setSelected(null); setActiveActivity(null); setActivitySignals(emptySignals());
   }
   function addPoint(x: number, y: number) { const point = { id: `custom-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`, x, y, label: activeLabel }; editDataset({ preset, points: [...points, point] }, 'Added a point'); setSelected(point.id); }
   function updatePoint(id: string, patch: Partial<Pick<Point, 'x' | 'y' | 'label'>>, action = 'Edited a point') { editDataset({ preset, points: points.map(p => p.id === id ? { ...p, ...patch } : p) }, action); }
@@ -151,23 +176,23 @@ function App() {
   function onPlotClick(event: MouseEvent<SVGSVGElement>) { if ((event.target as SVGElement).closest('[data-point]') || dragRef.current) return; const rect = event.currentTarget.getBoundingClientRect(); addPoint(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), Math.max(0, Math.min(1, 1 - (event.clientY - rect.top) / rect.height))); }
   function nudgePoint(id: string, dx: number, dy: number, large = false) { const point = points.find(item => item.id === id); if (!point) return; const step = large ? .05 : .01; updatePoint(id, { x: Math.max(0, Math.min(1, point.x + dx * step)), y: Math.max(0, Math.min(1, point.y + dy * step)) }, 'Moved a point with keyboard'); }
   function startActivity(id: ActivityId) {
-    const activity = activities.find(item => item.id === id)!; cancelDrag(); setActiveActivity(id); setActivitySignals(emptySignals()); setK(activity.initialK); setRun(null); setSelected(null); setSeed(42); setTab('experiment');
+    const activity = activities.find(item => item.id === id)!; cancelDrag(); setActiveActivity(id); setActivitySignals(emptySignals()); setAlgorithm(activity.initialAlgorithm ?? 'knn'); setK(activity.initialK); setTreeDepth(activity.initialTreeDepth ?? 3); setRun(null); setSelected(null); setSeed(42); setTab('experiment');
     editDataset({ preset: activity.preset, points: makeDataset(activity.preset, 42) }, `Started ${activity.title}`); setActivitySignals(emptySignals());
   }
-  function resetActivity() { if (!activeActivity) return; const activity = activities.find(item => item.id === activeActivity)!; setK(activity.initialK); setRun(null); setSelected(null); setSeed(42); editDataset({ preset: activity.preset, points: makeDataset(activity.preset, 42) }, `Reset ${activity.title}`); setActivitySignals(emptySignals()); setCompletedActivities(previous => previous.filter(id => id !== activity.id)); }
+  function resetActivity() { if (!activeActivity) return; const activity = activities.find(item => item.id === activeActivity)!; setAlgorithm(activity.initialAlgorithm ?? 'knn'); setK(activity.initialK); setTreeDepth(activity.initialTreeDepth ?? 3); setRun(null); setSelected(null); setSeed(42); editDataset({ preset: activity.preset, points: makeDataset(activity.preset, 42) }, `Reset ${activity.title}`); setActivitySignals(emptySignals()); setCompletedActivities(previous => previous.filter(id => id !== activity.id)); }
   function saveCurrent() {
     const storage = browserStorage(); if (!storage) { setStorageMessage('Local storage is unavailable in this browser.'); return; }
     if (savedState.status === 'valid') {
       const saved = savedState.value;
-      const replacingDifferent = JSON.stringify({ seed, preset, points, k, activeLabel, activeActivity, completedActivities, activitySignals }) !== JSON.stringify({ seed: saved.seed, preset: saved.preset, points: saved.points, k: saved.k, activeLabel: saved.activeLabel, activeActivity: saved.activeActivity, completedActivities: saved.completedActivities, activitySignals: saved.activityProgress });
+      const replacingDifferent = JSON.stringify({ seed, preset, points, k, algorithm, treeDepth, treeMinSamplesSplit: treeMinSamples, activeLabel, activeActivity, completedActivities, activitySignals }) !== JSON.stringify({ seed: saved.seed, preset: saved.preset, points: saved.points, k: saved.k, algorithm: saved.algorithm, treeDepth: saved.treeDepth, treeMinSamplesSplit: saved.treeMinSamplesSplit, activeLabel: saved.activeLabel, activeActivity: saved.activeActivity, completedActivities: saved.completedActivities, activitySignals: saved.activityProgress });
       if (replacingDifferent && !window.confirm('Replace the saved experiment on this device? This will overwrite the previous saved snapshot.')) return;
     }
-    const ok = saveExperiment(storage, { seed, preset, points, k, activeLabel, activeActivity, completedActivities, activityProgress: activitySignals });
+    const ok = saveExperiment(storage, { seed, preset, points, k, algorithm, treeDepth, treeMinSamplesSplit: treeMinSamples, activeLabel, activeActivity, completedActivities, activityProgress: activitySignals });
     setStorageMessage(ok ? 'Experiment saved on this device.' : 'Could not save. Browser storage may be full or the experiment may be invalid.'); setSavedState(loadExperiment(storage));
   }
   function restoreSaved() {
     if (savedState.status !== 'valid') return; cancelDrag(); const saved = savedState.value;
-    try { setHistory(previous => commitHistory(previous, { preset: saved.preset, points: saved.points }, 'Restored saved experiment')); setSeed(saved.seed); setK(saved.k); setActiveLabel(saved.activeLabel); setActiveActivity(saved.activeActivity); setCompletedActivities(saved.completedActivities); setActivitySignals(saved.activityProgress); setRun(null); setSelected(null); setStorageMessage('Saved experiment restored. Train again to calculate current results.'); }
+    try { setHistory(previous => commitHistory(previous, { preset: saved.preset, points: saved.points }, 'Restored saved experiment')); setSeed(saved.seed); setK(saved.k); setAlgorithm(saved.algorithm); setTreeDepth(saved.treeDepth); setTreeMinSamples(saved.treeMinSamplesSplit); setActiveLabel(saved.activeLabel); setActiveActivity(saved.activeActivity); setCompletedActivities(saved.completedActivities); setActivitySignals(saved.activityProgress); setRun(null); setSelected(null); setStorageMessage('Saved experiment restored. Train again to calculate current results.'); }
     catch { setStorageMessage('The saved experiment could not be restored.'); }
   }
   function clearSaved() { if (!window.confirm('Delete the saved experiment from this browser?')) return; const storage = browserStorage(); const ok = storage ? clearExperiment(storage) : false; setSavedState(storage ? loadExperiment(storage) : { status: 'unavailable' }); setStorageMessage(ok ? 'Saved experiment removed from this device.' : 'Saved experiment could not be cleared.'); }
@@ -204,31 +229,31 @@ function App() {
             </svg><div className="axis-y">FEATURE 2</div><div className="axis-x">FEATURE 1</div></div>
             <div className="plot-legend"><span><i className="legend-circle"/> Group A</span><span><i className="legend-diamond"/> Group B</span><span><i className="legend-test"/> Test example</span>{run && !stale && <span><i className="legend-region"/> Model region</span>}<span className="legend-explain">Outline = held-out test point</span></div>
           </section>
-          <aside className="panel model-panel"><div className="panel-head"><div><div className="panel-kicker">MODEL SETTINGS</div><h2>Configure &amp; train</h2></div><span className="algorithm-badge">AVAILABLE</span></div><label className="control-label" htmlFor="algorithm">ALGORITHM</label><div className="select-wrap disabled"><select id="algorithm" disabled value="knn"><option value="knn">k-Nearest Neighbors</option></select><ChevronDown size={15}/></div><p className="dataset-desc algorithm-desc">Classifies a point by looking at the labels of its nearest examples.</p><div className="k-control"><div><label htmlFor="k-slider" className="control-label">NEIGHBORS <span className="k-symbol">k</span></label><p>How many nearby examples vote?</p></div><output htmlFor="k-slider" className="k-value">{k}</output></div><input id="k-slider" type="range" min="1" max="15" step="2" value={k} onChange={e => setK(Number(e.target.value))} aria-label="Number of neighbors k"/><div className="range-labels"><span>1 · more local</span><span>15 · smoother</span></div><div className="parameter-note"><span>ⓘ</span><p>Odd values of <b>k</b> help avoid tied votes. Every vote comes from a training example.</p></div>
-            <div className="split-summary"><div className="panel-kicker">REPRODUCIBLE SPLIT <span className="seed-tag">SEED 123</span></div><div className="split-counts"><div><b>{run && !stale ? run.split.train.length : liveSplit.train.length}</b><span>Training</span></div><i/><div><b>{run && !stale ? run.split.test.length : liveSplit.test.length}</b><span>Test</span></div></div><p>Test examples stay out of the model’s neighbor list.</p></div>
-            <button className="button primary train-button" onClick={train} disabled={points.length < 4 || points.length - Math.round(points.length * .25) < 1}><Play size={15} fill="currentColor"/> {run && stale ? 'Run again' : run ? 'Train again' : 'Train model'}</button><div className="run-status" aria-live="polite">{points.length < 4 ? 'Add at least four examples to train.' : stale ? 'Experiment changed · previous results are stale.' : run ? <><Check size={13}/> Model trained on {run.split.train.length} examples</> : 'Ready when you are.'}</div>
+          <aside className="panel model-panel"><div className="panel-head"><div><div className="panel-kicker">MODEL SETTINGS</div><h2>Configure &amp; train</h2></div><span className="algorithm-badge">AVAILABLE</span></div><label className="control-label" htmlFor="algorithm">ALGORITHM</label><div className="select-wrap"><select id="algorithm" value={algorithm} onChange={event => setAlgorithm(event.currentTarget.value as 'knn' | 'decision-tree')}>{classifierDefinitions.map(definition => <option key={definition.id} value={definition.id}>{definition.name}</option>)}</select><ChevronDown size={15}/></div><p className="dataset-desc algorithm-desc">{algorithm === 'knn' ? 'Classifies a point by voting among its nearest training examples.' : 'Learns feature-threshold questions from training examples using weighted Gini impurity.'}</p>
+            {algorithm === 'knn' ? <><div className="k-control"><div><label htmlFor="k-slider" className="control-label">NEIGHBORS <span className="k-symbol">k</span></label><p>How many nearby examples vote?</p></div><output htmlFor="k-slider" className="k-value">{k}</output></div><input id="k-slider" type="range" min="1" max="15" step="2" value={k} onChange={e => setK(Number(e.target.value))} aria-label="Number of neighbors k"/><div className="range-labels"><span>1 · more local</span><span>15 · smoother</span></div><div className="parameter-note"><span>ⓘ</span><p>Odd values of <b>k</b> help avoid tied votes. Every vote comes from a training example.</p></div></> : <div className="tree-controls"><label htmlFor="tree-depth" className="control-label">MAXIMUM TREE DEPTH</label><div className="k-control"><input id="tree-depth" type="range" min="0" max="8" step="1" value={treeDepth} aria-label="Maximum tree depth" onChange={event => setTreeDepth(Number(event.currentTarget.value))}/><output htmlFor="tree-depth" className="k-value">{treeDepth}</output></div><div className="range-labels"><span>0 · one leaf</span><span>8 · more detail</span></div><label htmlFor="tree-min-samples" className="control-label tree-min-label">MINIMUM EXAMPLES TO SPLIT</label><input id="tree-min-samples" type="number" min="2" max="1000" step="1" value={treeMinSamples} onChange={event => setTreeMinSamples(Number(event.currentTarget.value))}/><p className="parameter-note">A node splits only when it has at least this many training examples and a useful split.</p></div>}
+            <div className="split-summary"><div className="panel-kicker">REPRODUCIBLE SPLIT <span className="seed-tag">SEED 123</span></div><div className="split-counts"><div><b>{run && !stale ? run.split.train.length : liveSplit.train.length}</b><span>Training</span></div><i/><div><b>{run && !stale ? run.split.test.length : liveSplit.test.length}</b><span>Test</span></div></div><p>Held-out test examples do not participate in model fitting.</p></div>
+            <button className="button primary train-button" onClick={train} disabled={points.length < 4 || points.length - Math.round(points.length * .25) < 1}><Play size={15} fill="currentColor"/> {run && stale ? 'Run again' : run ? 'Train again' : 'Train model'}</button><div className="run-status" aria-live="polite">{trainingError || (points.length < 4 ? 'Add at least four examples to train.' : stale ? `Experiment or model changed · previous results are stale.` : run ? <><Check size={13}/> Model trained on {run.split.train.length} examples</> : 'Ready when you are.')}</div>
           </aside>
         </div>
         <section className="results-grid">
-          <article className="panel result-panel" aria-live="polite"><div className="result-head"><div><div className="panel-kicker">MODEL CHECK</div><h2>Training and test scores</h2></div>{run && !stale ? <span className="inspect-tag">{run.split.test.length} HELD-OUT</span> : <span className="not-run">{stale ? 'STALE' : 'NOT RUN'}</span>}</div>
-            {run && !stale ? <><div className="score-pair"><div><span>TRAINING · IN-SAMPLE</span><b>{run.trainingEvaluation.accuracy === null ? 'N/A' : `${Math.round(run.trainingEvaluation.accuracy * 100)}%`}</b></div><div><span>TEST · HELD-OUT</span><b>{accuracy === null ? 'N/A' : `${Math.round(accuracy * 100)}%`}</b></div></div><p className="result-sub">Training accuracy measures examples included among the model's neighbors. Held-out accuracy measures examples excluded from fitting. It can be more useful for generalization, but is uncertain on a small sample.</p>{matrix && <><div className="matrix-title"><span>ACTUAL ↓ &nbsp; PREDICTED →</span><span>Group A&nbsp;&nbsp;&nbsp; Group B</span></div><div className="matrix"><b>Group A</b><strong>{matrix[0][0]}</strong><strong>{matrix[0][1]}</strong><b>Group B</b><strong>{matrix[1][0]}</strong><strong>{matrix[1][1]}</strong></div><table className="class-metric-table"><caption>Held-out scores by actual class</caption><thead><tr><th>Group</th><th>Support</th><th>Precision</th><th>Recall</th><th>F1</th></tr></thead><tbody>{(['A', 'B'] as const).map(label => { const item = run.evaluation.byClass[label]; const score = (value: number | null) => value === null ? 'N/A' : `${Math.round(value * 100)}%`; return <tr key={label}><th scope="row">{label}</th><td>{item.support}</td><td>{score(item.precision)}</td><td>{score(item.recall)}</td><td>{score(item.f1)}</td></tr>; })}</tbody></table></>}<p className="matrix-note">Rows are actual labels; columns are predicted labels. N/A means the metric's denominator is zero, so that score is undefined.</p><details className="evaluation-method"><summary>How the evaluation works</summary><p>A seeded split sets aside 25% of observations. The model uses training examples as neighbors; test examples are predicted afterward and do not vote. Comparing many settings on this same test split can gradually tune decisions to its examples, so treat the score as a learning check rather than a final unbiased estimate.</p></details></> : <div className="empty-result"><Activity size={18}/><span>{stale ? 'Run the changed experiment to refresh evaluation.' : 'Train the model to see scores on training and held-out examples.'}</span></div>}
+          <article className="panel result-panel" aria-live="polite"><div className="result-head"><div><div className="panel-kicker">MODEL CHECK · {run && !stale ? (run.model.algorithm === 'knn' ? 'K-NN' : 'DECISION TREE') : algorithm === 'knn' ? 'K-NN' : 'DECISION TREE'}</div><h2>Training and test scores</h2></div>{run && !stale ? <span className="inspect-tag">{run.split.test.length} HELD-OUT</span> : <span className="not-run">{stale ? 'STALE' : 'NOT RUN'}</span>}</div>
+            {run && !stale ? <><div className="score-pair"><div><span>TRAINING · IN-SAMPLE</span><b>{run.trainingEvaluation.accuracy === null ? 'N/A' : `${Math.round(run.trainingEvaluation.accuracy * 100)}%`}</b></div><div><span>TEST · HELD-OUT</span><b>{accuracy === null ? 'N/A' : `${Math.round(accuracy * 100)}%`}</b></div></div><p className="result-sub">Training accuracy measures the model on examples used to fit it. Held-out accuracy measures examples excluded from fitting. It is a generalization check, but uncertain on a small sample.</p>{matrix && <><div className="matrix-title"><span>ACTUAL ↓ &nbsp; PREDICTED →</span><span>Group A&nbsp;&nbsp;&nbsp; Group B</span></div><div className="matrix"><b>Group A</b><strong>{matrix[0][0]}</strong><strong>{matrix[0][1]}</strong><b>Group B</b><strong>{matrix[1][0]}</strong><strong>{matrix[1][1]}</strong></div><table className="class-metric-table"><caption>Held-out scores by actual class</caption><thead><tr><th>Group</th><th>Support</th><th>Precision</th><th>Recall</th><th>F1</th></tr></thead><tbody>{(['A', 'B'] as const).map(label => { const item = run.evaluation.byClass[label]; const score = (value: number | null) => value === null ? 'N/A' : `${Math.round(value * 100)}%`; return <tr key={label}><th scope="row">{label}</th><td>{item.support}</td><td>{score(item.precision)}</td><td>{score(item.recall)}</td><td>{score(item.f1)}</td></tr>; })}</tbody></table></>}<p className="matrix-note">Rows are actual labels; columns are predicted labels. N/A means the metric's denominator is zero, so that score is undefined.</p><details className="evaluation-method"><summary>How the evaluation works</summary><p>A seeded split sets aside 25% of observations. Test examples are predicted after fitting and do not participate in training. Comparing many settings on this same test split can gradually tune decisions to its examples, so treat the score as a learning check rather than a final unbiased estimate.</p></details></> : <div className="empty-result"><Activity size={18}/><span>{stale ? 'Run the changed experiment to refresh evaluation.' : 'Train the model to see scores on training and held-out examples.'}</span></div>}
           </article>
           <article className="panel result-panel inspector-panel" aria-labelledby="prediction-inspector-title">
             <div className="result-head"><div><div className="panel-kicker">PREDICTION INSPECTOR</div><h2 id="prediction-inspector-title">Why this prediction?</h2></div><span className="inspect-tag">{current ? 'SELECTED POINT' : 'NO POINT'}</span></div>
             {current && <div className="nudge-controls"><span>Move selected point</span><button aria-label="Move point up" onClick={() => nudgePoint(current.id,0,1)}><MoveUp size={13}/></button><button aria-label="Move point left" onClick={() => nudgePoint(current.id,-1,0)}><MoveLeft size={13}/></button><button aria-label="Move point down" onClick={() => nudgePoint(current.id,0,-1)}><MoveDown size={13}/></button><button aria-label="Move point right" onClick={() => nudgePoint(current.id,1,0)}><MoveRight size={13}/></button></div>}
-            {prediction && current && run ? <div className="prediction-explanation" aria-live="polite" role="status">
-              <div className="prediction-banner"><span className={`shape ${prediction.label.toLowerCase()}`}/><div><small>MODEL PREDICTS</small><b>Group {prediction.label}</b></div><span className="vote-count">{prediction.votes[prediction.label]} of {prediction.neighbors.length} votes</span></div>
-              <dl className="prediction-facts"><div><dt>Actual class</dt><dd>Group {current.label}</dd></div><div><dt>Result</dt><dd>{prediction.label === current.label ? 'Correct' : 'Incorrect'}</dd></div><div><dt>Example role</dt><dd>{run.split.test.some(p => p.id === current.id) ? 'Held-out test' : 'Training'}</dd></div><div><dt>k</dt><dd>{prediction.neighbors.length}</dd></div></dl>
-              <p className="neighbor-intro">Nearest training examples used in this prediction:</p>
-              <ol className="neighbor-list">{prediction.neighbors.map((n, i) => <li className="neighbor-row" key={n.point.id}><span className="rank">{i+1}</span><span className={`mini-shape ${n.point.label.toLowerCase()}`}/><span>Group {n.point.label}</span><code>{n.distance.toFixed(3)} units</code></li>)}</ol>
-              <p className="vote-breakdown">Votes: Group A {prediction.votes.A}, Group B {prediction.votes.B}. {prediction.votes.A === prediction.votes.B ? 'Tie broken by the closest neighbor.' : `Group ${prediction.label} has more votes.`}</p>
-              <p className="prediction-caption">Distances are straight-line distances between the two plotted features. Equal-distance neighbors are ordered by their point ID. Vote shares are not calibrated probabilities.</p>
-            </div> : <div className="empty-result"><ArrowDownRight size={18}/><span>{stale ? 'Results describe an older version of this experiment. Train again to refresh them.' : !current ? 'Select a point on the map or in the examples table to inspect it.' : 'Train the model to inspect genuine neighbors and votes for this point.'}</span></div>}
+            {explanation && current && run ? <div className="prediction-explanation" aria-live="polite" role="status">
+              <div className="prediction-banner"><span className={`shape ${(explanation.kind === 'knn' ? explanation.prediction.label : explanation.prediction).toLowerCase()}`}/><div><small>{run.model.algorithm === 'knn' ? 'K-NN PREDICTS' : 'DECISION TREE PREDICTS'}</small><b>Group {explanation.kind === 'knn' ? explanation.prediction.label : explanation.prediction}</b></div></div>
+              <dl className="prediction-facts"><div><dt>Actual class</dt><dd>Group {current.label}</dd></div><div><dt>Result</dt><dd>{explanation.prediction === current.label ? 'Correct' : 'Incorrect'}</dd></div><div><dt>Example role</dt><dd>{run.split.test.some(p => p.id === current.id) ? 'Held-out test' : 'Training'}</dd></div>{explanation.kind === 'knn' ? <div><dt>k</dt><dd>{explanation.prediction.neighbors.length}</dd></div> : <div><dt>Tree depth</dt><dd>{run.model.configuration.algorithm === 'decision-tree' ? run.model.configuration.maxDepth : 0}</dd></div>}</dl>
+              {explanation.kind === 'knn' ? <><p className="neighbor-intro">Nearest training examples used in this prediction:</p><ol className="neighbor-list">{explanation.prediction.neighbors.map((n, i) => <li className="neighbor-row" key={n.point.id}><span className="rank">{i+1}</span><span className={`mini-shape ${n.point.label.toLowerCase()}`}/><span>Group {n.point.label}</span><code>{n.distance.toFixed(3)} units</code></li>)}</ol><p className="vote-breakdown">Votes: Group A {explanation.prediction.votes.A}, Group B {explanation.prediction.votes.B}. {explanation.prediction.votes.A === explanation.prediction.votes.B ? 'Tie broken by the closest neighbor.' : `Group ${explanation.prediction.label} has more votes.`}</p><p className="prediction-caption">Distances are straight-line distances between the two plotted features. Equal-distance neighbors are ordered by point ID. Vote shares are not calibrated probabilities.</p></> : <><p className="neighbor-intro">Actual decisions made by the learned tree:</p>{explanation.path.length ? <ol className="tree-path-compact">{explanation.path.map(step => <li key={step.nodeId}>Feature {step.feature === 'x' ? '1' : '2'} value {step.value.toFixed(3)} is {step.direction === 'left' ? 'less than' : 'at least'} {step.threshold.toFixed(3)}; follow {step.direction}.</li>)}</ol> : <p className="vote-breakdown">The root is a leaf, so the tree uses the majority class from all {explanation.leaf.sampleCount} training examples.</p>}<p className="prediction-caption">Reached a leaf with A {explanation.leaf.counts.A} and B {explanation.leaf.counts.B} training examples. These counts are not calibrated probabilities.</p></>}
+            </div> : <div className="empty-result"><ArrowDownRight size={18}/><span>{stale ? 'Results describe an older version of this experiment. Train again to refresh them.' : !current ? 'Select a point on the map or in the examples table to inspect it.' : 'Train the selected model to inspect its explanation for this point.'}</span></div>}
           </article>
           <article className="panel result-panel point-table-panel"><div className="result-head"><div><div className="panel-kicker">ACCESSIBLE DATA EDITOR</div><h2>Examples <span className="title-count">{points.length}</span></h2></div><span className="inspect-tag">SELECT TO INSPECT</span></div><div className="point-table-wrap"><table><caption className="sr-only">Edit or remove dataset examples</caption><thead><tr><th>Group</th><th>Feature 1</th><th>Feature 2</th><th>Role</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{points.slice(0, 8).map(p => { const isTest = run && !stale && run.split.test.some(t => t.id === p.id); return <tr key={p.id} className={selected === p.id ? 'selected-row' : ''} onClick={() => selectPoint(p)}><td><button className="table-label" aria-label={`Change ${p.id} label`} onClick={e => {e.stopPropagation(); updatePoint(p.id,{label:p.label==='A'?'B':'A'});}}><i className={`mini-shape ${p.label.toLowerCase()}`}/> {p.label} ↻</button></td><td><input aria-label={`${p.id} Feature 1`} type="number" min="0" max="1" step="0.01" value={p.x.toFixed(2)} onChange={e=>updatePoint(p.id,{x:Math.max(0,Math.min(1,Number(e.target.value)))})}/></td><td><input aria-label={`${p.id} Feature 2`} type="number" min="0" max="1" step="0.01" value={p.y.toFixed(2)} onChange={e=>updatePoint(p.id,{y:Math.max(0,Math.min(1,Number(e.target.value)))})}/></td><td><span className={`role-pill ${isTest ? 'test' : ''}`}>{isTest ? 'TEST' : 'TRAIN'}</span></td><td><button className="row-delete" aria-label={`Delete ${p.id}`} onClick={e=>{e.stopPropagation();removePoint(p.id);}}><Trash2 size={13}/></button></td></tr>;})}</tbody></table>{points.length > 8 && <p className="table-foot">Showing first 8 of {points.length}. Click the map to add an example.</p>}</div></article>
         </section>
         <ComparisonPanel comparison={comparison?.result ?? null} stale={comparisonStale} canCompare={points.length >= 4 && comparisonKs.every(value => value <= comparisonTrainCount)} error={comparisonError} kValues={comparisonKs} onKChange={(index, value) => setComparisonKs(previous => { const next: [number, number] = [...previous]; next[index] = value; return next; })} onCompare={compareModels}/>
-        <SavedExperimentComparison current={{ label: 'Current experiment', preset, points, k, splitSeed: 123 }} saved={savedState.status === 'valid' ? savedState.value : null}/>
+        <CrossModelComparisonPanel values={crossValues} result={crossResult?.result ?? null} stale={crossStale} error={crossError} onChange={(index, value) => setCrossValues(previous => { const next: [ClassifierConfiguration, ClassifierConfiguration] = [...previous]; next[index] = value; return next; })} onCompare={compareAcrossAlgorithms}/>
+        <SavedExperimentComparison current={{ label: 'Current experiment', preset, points, k, algorithm, treeDepth, treeMinSamplesSplit: treeMinSamples, splitSeed: 123 }} saved={savedState.status === 'valid' ? savedState.value : null}/>
+        <DecisionTreeView model={run?.model.algorithm === 'decision-tree' ? run.model : null} explanation={explanation?.kind === 'decision-tree' ? explanation : null} stale={stale || algorithm !== 'decision-tree'}/>
         <section className="bottom-notes"><div className="activity-callout"><span className="callout-icon"><Sparkles size={16}/></span><div><b>Try this: make a tricky example</b><p>Add a point near the boundary or flip a label. What changes when you train again?</p></div><button className="text-button" onClick={() => {setActiveLabel(activeLabel==='A'?'B':'A'); window.scrollTo({top:0,behavior:'smooth'});}}>Choose the other label <ArrowUpRight size={13}/></button></div><p className="privacy-note"><span className="shield">◈</span> Your experiment stays in this browser. No account, tracking, or external AI service. <span className="note-dot">·</span> Synthetic examples teach model behavior; they don’t guarantee real-world performance.</p></section>
       </>}
     </main>

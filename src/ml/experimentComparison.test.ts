@@ -4,7 +4,7 @@ import { compareExperiments } from './experimentComparison';
 
 describe('current and saved experiment comparison', () => {
   const points = makeDataset('separated');
-  const current = { label: 'Current experiment', preset: 'separated' as const, points, k: 3, splitSeed: 123 };
+  const current = { label: 'Current experiment', preset: 'separated' as const, points, k: 3, algorithm: 'knn' as const, splitSeed: 123 };
 
   it('recomputes metrics and recognizes identical datasets and evaluation examples', () => {
     const result = compareExperiments(current, { ...current, label: 'Saved experiment', k: 5 });
@@ -22,6 +22,6 @@ describe('current and saved experiment comparison', () => {
   });
 
   it('rejects a saved k that does not fit its training partition', () => {
-    expect(() => compareExperiments(current, { ...current, label: 'Saved experiment', k: 99 })).toThrow(/Saved experiment/);
+    expect(() => compareExperiments(current, { ...current, label: 'Saved experiment', k: 99 })).toThrow(/k must be/);
   });
 });

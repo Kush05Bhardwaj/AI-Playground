@@ -12,7 +12,7 @@ const percent = (value: number | null) => value === null ? 'N/A' : `${Math.round
 function ConfigSummary({ title, result }: { title: string; result: ExperimentComparison['current'] }) {
   return <div className="saved-score-card"><h3>{title}</h3><dl>
     <div><dt>Dataset</dt><dd>{result.preset} · {result.pointCount} points</dd></div>
-    <div><dt>Model</dt><dd>k = {result.k}</dd></div>
+    <div><dt>Model</dt><dd>{result.algorithm === 'knn' ? `k-NN · k = ${result.k}` : `Decision tree · depth ${result.treeDepth}, minimum split ${result.treeMinSamplesSplit}`}</dd></div>
     <div><dt>Evaluation split</dt><dd>seed {result.splitSeed} · {result.trainCount} train / {result.testCount} test</dd></div>
     <div><dt>Training accuracy</dt><dd>{percent(result.training.accuracy)}</dd></div>
     <div><dt>Held-out accuracy</dt><dd>{percent(result.test.accuracy)}</dd></div>
@@ -21,7 +21,7 @@ function ConfigSummary({ title, result }: { title: string; result: ExperimentCom
 }
 
 export default function SavedExperimentComparison({ current, saved }: Props) {
-  const inputKey = useMemo(() => JSON.stringify({ current, saved: saved && { preset: saved.preset, points: saved.points, k: saved.k } }), [current, saved]);
+  const inputKey = useMemo(() => JSON.stringify({ current, saved }), [current, saved]);
   const [stored, setStored] = useState<{ key: string; result: ExperimentComparison } | null>(null);
   const [error, setError] = useState('');
   const stale = stored !== null && stored.key !== inputKey;
@@ -29,7 +29,7 @@ export default function SavedExperimentComparison({ current, saved }: Props) {
   function compare() {
     if (!saved) return;
     try {
-      setStored({ key: inputKey, result: compareExperiments(current, { label: 'Saved experiment', preset: saved.preset, points: saved.points, k: saved.k, splitSeed: 123 }) });
+      setStored({ key: inputKey, result: compareExperiments(current, { label: 'Saved experiment', preset: saved.preset, points: saved.points, k: saved.k, algorithm: saved.algorithm, treeDepth: saved.treeDepth, treeMinSamplesSplit: saved.treeMinSamplesSplit, splitSeed: 123 }) });
       setError('');
     } catch (cause) {
       setStored(null);
