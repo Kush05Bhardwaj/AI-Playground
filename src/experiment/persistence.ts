@@ -77,8 +77,12 @@ export function loadExperiment(storage: StorageLike): LoadResult {
       return { status: 'valid', value: migrated };
     }
     if ((parsed as { schemaVersion?: unknown }).schemaVersion !== PERSISTENCE_VERSION) return { status: 'invalid', reason: 'This saved experiment uses an unsupported version.' };
-    if (!isSavedExperiment(parsed)) return { status: 'invalid', reason: 'The saved experiment contains invalid data.' };
-    return { status: 'valid', value: parsed };
+    const version2 = parsed as Partial<SavedExperiment>;
+    const normalized = version2.activityProgress && !Array.isArray(version2.activityProgress.runTreeDepths)
+      ? { ...version2, activityProgress: { ...version2.activityProgress, runTreeDepths: [] } }
+      : parsed;
+    if (!isSavedExperiment(normalized)) return { status: 'invalid', reason: 'The saved experiment contains invalid data.' };
+    return { status: 'valid', value: normalized };
   } catch { return { status: 'unavailable' }; }
 }
 

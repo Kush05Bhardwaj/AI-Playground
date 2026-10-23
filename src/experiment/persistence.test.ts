@@ -38,6 +38,15 @@ describe('local experiment persistence', () => {
     expect(clearExperiment(storage)).toBe(true);
     expect(storage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
   });
+  it('keeps Phase 4 version 2 progress readable when tree-activity fields are absent', () => {
+    const storage = new MemoryStorage();
+    const { runKs, edited, inspectedTest, inspectedMistake, editedAfterMistake, rerunAfterEdit, comparedEvaluation } = value.activityProgress;
+    const phase4Progress = { runKs, edited, inspectedTest, inspectedMistake, editedAfterMistake, rerunAfterEdit, comparedEvaluation };
+    storage.values.set(STORAGE_KEY, JSON.stringify({ ...value, activityProgress: phase4Progress, schemaVersion: 2, savedAt: '2025-01-01T00:00:00.000Z' }));
+    const loaded = loadExperiment(storage);
+    expect(loaded.status).toBe('valid');
+    if (loaded.status === 'valid') expect(loaded.value.activityProgress.runTreeDepths).toEqual([]);
+  });
   it('rejects invalid points and clears saved state safely', () => {
     const storage = new MemoryStorage(); expect(saveExperiment(storage, { ...value, points: [{ ...value.points[0]!, x: 2 }] })).toBe(false);
     expect(clearExperiment(storage)).toBe(true);
