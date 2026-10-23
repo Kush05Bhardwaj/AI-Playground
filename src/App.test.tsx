@@ -11,6 +11,58 @@ describe('AI Playground workspace', () => {
     expect(screen.getByText(/14 HELD-OUT/i)).toBeTruthy();
   });
 
+  it('offers an explicit empty inspector state, then explains a selected point by keyboard', () => {
+    render(<App />);
+    expect(screen.getByText(/select a point on the map or in the examples table/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    const testPoint = screen.getAllByRole('button', { name: /test example/i })[0]!;
+    fireEvent.keyDown(testPoint, { key: 'Enter' });
+    expect(screen.getByText('Actual class')).toBeTruthy();
+    expect(screen.getByText('Held-out test')).toBeTruthy();
+    expect(screen.getByText(/Votes: Group A \d+, Group B \d+/)).toBeTruthy();
+    expect(screen.getByText(/Vote shares are not calibrated probabilities/i)).toBeTruthy();
+  });
+
+  it('compares two k settings on the same held-out set and invalidates changed settings', () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Compare settings' }));
+    expect(screen.getByText(/Same split: 42 training and 14 held-out examples/i)).toBeTruthy();
+    expect(screen.getByRole('article', { name: /Results for k equals 1/i })).toBeTruthy();
+    expect(screen.getByRole('article', { name: /Results for k equals 7/i })).toBeTruthy();
+    fireEvent.change(screen.getByRole('slider', { name: 'Comparison configuration 2 k' }), { target: { value: '9' } });
+    expect(screen.getByText(/Dataset or comparison settings changed/i)).toBeTruthy();
+    expect(screen.queryByRole('article', { name: /Results for k equals 7/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Compare settings' }));
+    fireEvent.change(screen.getByLabelText('DATASET PRESET'), { target: { value: 'overlap' } });
+    expect(screen.getByText(/Dataset or comparison settings changed/i)).toBeTruthy();
+    expect(screen.queryByRole('article', { name: /Results for k equals 9/i })).toBeNull();
+  });
+
+  it('recomputes and compares the saved experiment without trusting stored metrics', () => {
+    window.localStorage.clear();
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /Save on this device/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Compare current with saved' }));
+    expect(screen.getByText(/The datasets match\. The held-out examples match\./i)).toBeTruthy();
+    expect(screen.getAllByText(/Held-out accuracy/)).toHaveLength(2);
+    fireEvent.change(screen.getByRole('slider', { name: 'Number of neighbors k' }), { target: { value: '7' } });
+    expect(screen.getByText(/An experiment or setting changed\. Recompute this comparison/i)).toBeTruthy();
+  });
+
+  it('asks before replacing a different saved snapshot and preserves it when declined', () => {
+    window.localStorage.clear();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /Save on this device/i }));
+    const storageKey = 'ai-playground.experiment.v1';
+    const original = window.localStorage.getItem(storageKey);
+    fireEvent.change(screen.getByLabelText('DATASET PRESET'), { target: { value: 'noisy' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save on this device/i }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/overwrite the previous saved snapshot/i));
+    expect(window.localStorage.getItem(storageKey)).toBe(original);
+    confirm.mockRestore();
+  });
+
   it('switches dataset presets and explains the chosen data', () => {
     render(<App />);
     fireEvent.change(screen.getByLabelText('DATASET PRESET'), { target: { value: 'noisy' } });

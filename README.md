@@ -1,6 +1,6 @@
-# AI Playground
+﻿# AI Playground
 
-An in-browser machine-learning lab for exploring how k-nearest neighbors (k-NN) classifies two-dimensional synthetic data. The app needs no account, backend, or external AI service. Student-created points and saved experiments stay in this browser.
+An in-browser machine-learning lab for students to explore how k-nearest neighbors (k-NN) classifies two-dimensional synthetic data. No account, backend, or external AI service is required. Student-created observations and the saved experiment stay in this browser.
 
 ## Run locally
 
@@ -13,59 +13,64 @@ npm run dev
 
 Vite prints the local URL, usually `http://localhost:5173`.
 
-Useful checks:
+Verification commands:
 
 ```sh
 npm run typecheck
-npm test
+npm test -- --maxWorkers=1 --minWorkers=1
 npm run lint
 npm run build
 ```
 
-## Try an experiment
+## Explore an experiment
 
 1. Choose a preset: separated groups, overlapping groups, or noisy labels.
 2. Choose Group A or B, then click an empty place on the feature map to add an example.
-3. Drag a point to move it. Select it and use the arrow keys or the inspector's move buttons for precise keyboard-accessible movement. Coordinates stay within the plotted 0–1 range.
-4. Change `k` and train the model. The boundary and all predictions come from the same real k-NN implementation.
-5. Inspect outlined test points. They are excluded from training; the panel shows their nearest training examples and the held-out confusion matrix.
-6. Change a point or `k` and train again. Results from the previous run are marked stale until recalculated.
+3. Drag an existing point to move it. Select it and use arrow keys or the inspector move buttons for keyboard-accessible movement. Coordinates stay within the plotted 0–1 range.
+4. Set `k` and train. The points, predictions, and shaded decision regions use the same real k-NN classifier.
+5. Outlined observations are held out from training. Select one by mouse or keyboard to inspect its prediction.
+6. Edit the data or model setting and train again. Results from a different data/configuration signature are marked stale and hidden until recalculated.
 
-## Editing history
+Adding, moving, relabeling, deleting, clearing, switching presets, and restoring a saved experiment are undoable dataset edits. A completed drag is one edit. Training is not part of dataset history. Use **Undo** / **Redo**, `Ctrl+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y` (`Cmd` on macOS). History holds up to 50 snapshots.
 
-Adding, moving, relabeling, deleting, clearing, switching presets, and restoring a saved experiment are dataset edits. Each completed drag is one edit. Use **Undo** and **Redo**, or `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y` also redoes; use `Cmd` on macOS). History holds up to 50 dataset snapshots. Training itself is not an edit. Starting fresh asks for confirmation and clears the current undo history.
+## Compare two model settings
 
-## Save and restore
+The **Compare two k-NN settings** panel evaluates two `k` values using one shared seeded split of the current dataset. Both configurations receive exactly the same training examples and make predictions for the same held-out examples. The panel reports training accuracy, held-out accuracy, test confusion matrices, and precision, recall, F1, and support for each group.
 
-Select **Save** or **Save on this device** to store a versioned experiment in this browser's local storage. It includes the preset, point data, seed, `k`, active label, current activity, activity completion and partial activity progress. It excludes predictions and metrics; restored experiments must be trained again. **Restore** loads the saved snapshot, **Clear saved** removes it, and **Start fresh** resets the current workspace. This is local-only storage, not cloud sync. Storage may be unavailable or full; the app reports save/restore errors and validates saved data before using it. No student identity is stored.
+Only `k` is adjustable because Euclidean distance is the only implemented metric and there are no other model parameters. Higher training accuracy does not make a configuration better. Accuracy can hide class-level differences, so inspect the confusion matrix and per-class scores too.
 
-## Guided activities
+The split uses seed `123` and holds approximately 25% of observations out. It is deterministic for the same point order and dataset. The current split is not stratified; on small or imbalanced datasets a class may have few or no test examples. A metric whose denominator is zero is shown as `N/A` (undefined), with the class support displayed. Repeatedly comparing settings on the same held-out split can tune choices to those test observations and make the score less reliable as a final estimate of future performance.
 
-The Learn page includes six experiments with real model interactions:
+## Inspect one prediction
 
-- **Teach the model:** train and inspect a held-out point.
-- **What does `k` change?:** train on the same data with two values of `k`.
-- **Add noise:** edit the noisy dataset and train again.
-- **Investigate overfitting:** compare `k=1` and `k=15`, boundaries, and scores. A detailed boundary alone is not proof of overfitting; the training score is explicitly labeled in-sample and can be optimistic.
-- **Test before you trust:** train, inspect the two sample counts and scores, then confirm that comparison.
-- **Fix the mistake:** inspect a misclassified test point, edit the data, and train again.
+Select a point on the map or in the accessible examples table. The inspector shows its known actual class, predicted class, correctness, training/test role, configured `k`, nearest training examples, straight-line distances, and A/B vote counts. A test observation is not in the training neighbor list. A training observation may be its own neighbor, so use held-out points for an independent check.
 
-Completion is based on those actions, not on opening an activity. Activity progress is saved when the student saves the experiment.
+The classifier breaks tied class votes using the closest neighbor. Equal-distance neighbors are ordered by point ID. Displayed vote counts and shares are not calibrated probabilities.
 
-## Architecture and model details
+## Compare current and saved experiments
 
-- `src/ml/` contains deterministic dataset generation, seeded 75/25 train/test splitting, pure TypeScript k-NN, and evaluation. The confusion matrix uses rows for actual labels and columns for predictions.
+Use **Save on this device** to store the current dataset, seed, settings, and learning progress. The existing version 1 persistence schema remains unchanged; prediction and metric values are not saved. The **Current vs saved experiment** panel recomputes both configurations from their stored point data. It identifies dataset, model setting, and evaluation split differences. When test examples differ, the UI warns that scores are not directly comparable. Replacing a different saved snapshot asks for confirmation; only one local saved snapshot is retained. There is no cloud sync or account system.
+
+**Restore** loads the saved configuration, clears current model results, and requires a new run. **Start fresh** and **Clear saved** ask for confirmation. Malformed or unsupported saved data is rejected with a message. No personal student information is stored.
+
+## Guided learning
+
+The Learn page has six activities: Teach the Model, What Does `k` Change?, Add Noise, Investigate Overfitting, Test Before You Trust, and Fix the Mistake. Each has an objective, challenge, steps, an optional hint, an explanation, a reset action, and an action-based completion rule. Opening an activity alone does not complete it. Activities use the existing k-NN implementation and current experiment data.
+
+## Architecture
+
+- `src/ml/` contains seeded dataset generation and splitting, k-NN, evaluation metrics, same-split configuration comparison, and current/saved experiment scoring.
 - `src/experiment/history.ts` provides immutable, validated, 50-step dataset undo/redo.
-- `src/experiment/persistence.ts` validates and stores the versioned local snapshot. Derived predictions and metrics are never restored.
-- `src/learning/activities.ts` defines the six activities and their completion conditions.
-- `src/App.tsx` coordinates interaction state and draws the SVG workspace. Drag preview is separate from dataset state; the dataset changes once on pointer release.
+- `src/experiment/persistence.ts` validates versioned local experiment snapshots. Derived metrics are recomputed on use.
+- `src/learning/activities.ts` defines activity objectives, hints, explanations, and completion rules.
+- `src/components/` contains comparison panels; `src/App.tsx` coordinates state and SVG interaction.
 
-The training score is computed on training observations, which are also present in the k-NN reference set. It is an in-sample score and can be optimistic. Test metrics use only held-out predictions. Both are classroom demonstrations on small synthetic samples, not evidence of real-world performance.
+## Accessibility and known limits
 
-## Verification
+The map exposes each point as a keyboard-focusable button with a text label; Enter/Space selects it and arrow keys move it. Shape as well as color distinguishes the groups. The examples table and inspector provide text alternatives to essential chart information. Visible keyboard focus, semantic labels, and responsive narrow-screen layout are included.
 
-At the Phase 2 implementation pass, `npm run typecheck`, `npm test -- --maxWorkers=1 --minWorkers=1` (22 tests), `npm run lint`, and `npm run build` all passed. The tests cover k-NN, splitting, metrics, history validation and limits, local persistence validation, activity completion, UI training, dragging, undo/redo, preset changes, local save/restore, fresh reset, plot help, and one guided activity. The full app was not manually reviewed with a screen reader or on physical touch hardware; browser-level behavior still needs that review.
+Screen-reader behavior, contrast under different display settings, and touch interactions still need manual review with assistive technology and physical devices. The table shows the first eight observations; all plotted points remain keyboard-focusable. This version supports two numeric features, two classes, and Euclidean k-NN only. It has no calibrated probability output, stratified or repeated cross-validation, decision tree, multiple-snapshot archive, export/import, or cloud sync. A complex boundary alone is not treated as proof of overfitting.
 
-## Known limits
+## Verification record
 
-The lab supports only two numeric features, two classes, and k-NN. There is no drag-to-move history across browser sessions, export/import, cloud sync, decision tree, logistic regression, or teacher-reviewed curriculum. The accessible point table shows the first eight rows; every plotted point remains keyboard-focusable, with arrow-key movement. Synthetic results do not guarantee performance on real data.
+The Phase 3 final verification results and test coverage are recorded in [docs/17_PHASE3_IMPLEMENTATION.md](docs/17_PHASE3_IMPLEMENTATION.md).
