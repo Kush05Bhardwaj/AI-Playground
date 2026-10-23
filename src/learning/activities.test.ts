@@ -16,4 +16,8 @@ describe('guided activity completion', () => {
     expect(isActivityComplete('fix-mistake', { ...emptySignals(), inspectedMistake: true, editedAfterMistake: true })).toBe(false);
     expect(isActivityComplete('fix-mistake', { ...emptySignals(), inspectedMistake: true, editedAfterMistake: true, rerunAfterEdit: true })).toBe(true);
   });
+  it('requires two distinct trained tree depths for the tree activity', () => {
+    expect(isActivityComplete('grow-tree', { ...emptySignals(), runTreeDepths: [1] })).toBe(false);
+    expect(isActivityComplete('grow-tree', { ...emptySignals(), runTreeDepths: [1, 4] })).toBe(true);
+  });
 });
