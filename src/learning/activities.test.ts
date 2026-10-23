@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { emptySignals, isActivityComplete } from './activities';
+import { activities, emptySignals, isActivityComplete } from './activities';
 describe('guided activity completion', () => {
+  it('provides progressive hints for every activity without making them completion criteria', () => {
+    expect(activities.every(activity => activity.hint.trim().length > 10)).toBe(true);
+    expect(isActivityComplete('teach-model', emptySignals())).toBe(false);
+  });
   it('does not complete by opening; Teach the Model requires a run and test inspection', () => {
     expect(isActivityComplete('teach-model', emptySignals())).toBe(false);
     expect(isActivityComplete('teach-model', { ...emptySignals(), runKs: [5] })).toBe(false);
