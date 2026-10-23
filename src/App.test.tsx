@@ -222,4 +222,29 @@ describe('AI Playground workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Learn' }));
     expect(screen.getByRole('button', { name: /Review activity/i })).toBeTruthy();
   });
+
+  it('trains a decision tree, exposes its prediction path, and compares algorithms on one split', () => {
+    window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('ALGORITHM'), { target: { value: 'decision-tree' } });
+    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    expect(screen.getByText(/Model trained on 42 examples/i)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Decision tree' })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: /test example/i })[0]!);
+    expect(screen.getByText(/Selected point's path/i)).toBeTruthy();
+    expect(screen.getByText(/Reached leaf:/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Compare on the same split/i }));
+    expect(screen.getByText(/42 training \/ 14 held-out examples for both models/i)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Maximum depth'), { target: { value: '1' } });
+    expect(screen.getByText(/data or settings changed/i)).toBeTruthy();
+  });
+
+  it('recovers from malformed saved data and reports storage write failures', () => {
+    window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
+    window.localStorage.setItem('ai-playground.experiment.v2', '{broken');
+    render(<App />);
+    expect(screen.getByText(/saved experiment is not valid JSON/i)).toBeTruthy();
+    expect(screen.getByText(/saved experiment is not valid JSON/i)).toBeTruthy();
+  });
 });

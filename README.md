@@ -13,6 +13,17 @@ npm run dev
 
 Vite prints the local URL, usually `http://localhost:5173`.
 
+## Verify and build
+
+```sh
+npm run typecheck
+npm test -- --maxWorkers=1
+npm run lint
+npm run build
+```
+
+The build writes a static site to `dist/`. There are no required environment variables. To publish, configure a static host to build with `npm ci` and `npm run build`, then serve the contents of `dist/`. No hosting provider is configured in this repository yet; see [docs/13_DEPLOYMENT.md](docs/13_DEPLOYMENT.md) and [the Phase 6 release record](docs/20_PHASE6_RELEASE.md).
+
 ## Start here
 
 On first visit, a short introduction points out the feature map, model controls, prediction explanations, and evaluation scores. Close it at any time; it will not appear again on this browser unless reopened with **How to use AI Playground**. For a first experiment, choose a dataset, inspect group locations and counts, make a prediction guess for the outlined test example, then train a model and compare its prediction and held-out scores with your expectation.
@@ -54,4 +65,4 @@ Keyboard users can focus plotted examples, select with Enter/Space, and move wit
 
 ## Verification
 
-Implementation details and the Phase 4 verification record are in [docs/18_PHASE4_IMPLEMENTATION.md](docs/18_PHASE4_IMPLEMENTATION.md).
+Phase-specific implementation and verification records are in [docs/18_PHASE4_IMPLEMENTATION.md](docs/18_PHASE4_IMPLEMENTATION.md), [docs/19_PHASE5_IMPLEMENTATION.md](docs/19_PHASE5_IMPLEMENTATION.md), and [docs/20_PHASE6_RELEASE.md](docs/20_PHASE6_RELEASE.md). Current Phase 6 checks pass: TypeScript, 58 automated tests, ESLint, and the production build. Browser/device and assistive-technology checks that still need a human are listed in the release record.
