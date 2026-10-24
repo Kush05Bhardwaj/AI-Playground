@@ -51,4 +51,8 @@ describe('local experiment persistence', () => {
     const storage = new MemoryStorage(); expect(saveExperiment(storage, { ...value, points: [{ ...value.points[0]!, x: 2 }] })).toBe(false);
     expect(clearExperiment(storage)).toBe(true);
   });
+  it('reports failed storage writes without throwing', () => {
+    const blocked: StorageLike = { getItem() { return null; }, setItem() { throw new Error('quota exceeded'); }, removeItem() {} };
+    expect(saveExperiment(blocked, value)).toBe(false);
+  });
 });

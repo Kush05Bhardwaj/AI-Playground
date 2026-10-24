@@ -13,25 +13,36 @@ npm run dev
 
 Vite prints the local URL, usually `http://localhost:5173`.
 
+## Verify and build
+
+```sh
+npm run typecheck
+npm test -- --maxWorkers=1
+npm run lint
+npm run build
+```
+
+The build writes a static site to `dist/`. There are no required environment variables. To publish, configure a static host to build with `npm ci` and `npm run build`, then serve the contents of `dist/`. No hosting provider is configured in this repository yet; see [docs/13_DEPLOYMENT.md](docs/13_DEPLOYMENT.md) and [the Phase 6 release record](docs/20_PHASE6_RELEASE.md).
+
 ## Start here
 
-On first visit, a short introduction points out the feature map, model controls, prediction explanations, and evaluation scores. Close it at any time; it will not appear again on this browser unless reopened with **How to use AI Playground**. For a first experiment, choose a dataset, inspect group locations and counts, make a prediction guess for the outlined test example, then train a model and compare its prediction and held-out scores with your expectation.
+On first visit, a short introduction points out the feature map, model controls, prediction explanations, and evaluation scores. Close it at any time; it will not appear again on this browser unless reopened with **How to use AI Playground**. For a first experiment, explore the examples, make a prediction guess, then teach the model and inspect practice and validation scores. After choosing settings, select **Evaluate on unseen examples** to reveal the reserved test score.
 
 ## Explore a model
 
-1. Choose a dataset preset, then select Group A or B and click the feature map to add examples. Drag existing points to move them; select one to edit its label or coordinates. Undo and redo restore dataset changes. Outlined points are held out before training and never participate in fitting.
+1. Choose a dataset preset, then select Group A or B and click the feature map to add examples. Drag existing points to move them; select one to edit its label or coordinates. Undo and redo restore dataset changes. Practice, validation, and test examples are assigned deterministically; validation and test examples do not participate in fitting.
 2. Choose k-NN or Decision Tree. k-NN uses `k` nearby training examples. The tree repeatedly selects a feature threshold with the best weighted Gini impurity reduction, stopping at its depth limit or when a node cannot be usefully split.
-3. Train. The model sees only training examples. Outlined points are held out. The same fitted model computes predictions, the evaluation metrics, the map's decision regions, and the selected point's explanation.
+3. Teach the model. It learns only from practice examples. Practice accuracy measures fit; validation accuracy supports model selection. The fitted model also computes map regions and prediction explanations.
 4. For a tree, inspect its learned questions and branches. Select a point to highlight its actual route through the tree and the training counts in its leaf.
 5. Change data or model settings and train again. The prediction challenge requires a fresh guess for the current data and settings before revealing the next run. Challenge answers do not alter the dataset or undo history. Results from a different dataset or configuration are marked stale until recalculated.
 
-The inspector exposes nearest examples and votes for k-NN, or the actual threshold route and leaf counts for a tree. Counts and vote shares are not calibrated probabilities. Training accuracy describes fit to examples the model has already seen; use held-out metrics and the confusion matrix to inspect generalization and class-level mistakes.
+The inspector exposes nearest examples and votes for k-NN, or the actual threshold route and leaf counts for a tree. Counts and vote shares are not calibrated probabilities. Practice accuracy describes fit to examples the model has already seen; use validation results to compare settings and the reserved test score for a final class-level check.
 
 ## Compare models
 
-**Compare two k-NN settings** compares two `k` values on one seeded split. **Compare algorithms** lets you choose k-NN or a tree on each side; both use the same training examples and make predictions for exactly the same held-out examples. Both panels recalculate from current data. Comparisons become stale after relevant data or settings change.
+**Compare two k-NN settings** compares two `k` values on one seeded split. **Compare algorithms** lets you choose k-NN or a tree on each side; both use the same practice examples and validation examples. The test set is excluded from these comparisons. Both panels recalculate from current data and become stale after relevant data or settings change.
 
-The split uses seed `123` and holds approximately 25% of observations out. It is deterministic and not stratified, so a small or imbalanced dataset may have few or no test examples from one class. Undefined metric denominators are shown as `N/A`. Repeatedly choosing settings from the same test set can tune to those observations and weaken it as a final estimate.
+The split uses seed `123`. With at least 10 examples it assigns approximately 60% to practice, 20% to validation, and 20% to test. Smaller datasets use practice/test and disable setting comparisons because a separate validation set would be too small. The split is deterministic and not stratified, so class balance can vary between partitions. Undefined metric denominators are shown as `N/A`. Use validation scores to choose settings, then select **Evaluate on unseen examples** for the test score. Using test scores to change settings makes them less independent.
 
 ## Save, restore, and learn
 
@@ -54,4 +65,4 @@ Keyboard users can focus plotted examples, select with Enter/Space, and move wit
 
 ## Verification
 
-Implementation details and the Phase 4 verification record are in [docs/18_PHASE4_IMPLEMENTATION.md](docs/18_PHASE4_IMPLEMENTATION.md).
+Phase-specific implementation and verification records are in [docs/18_PHASE4_IMPLEMENTATION.md](docs/18_PHASE4_IMPLEMENTATION.md), [docs/19_PHASE5_IMPLEMENTATION.md](docs/19_PHASE5_IMPLEMENTATION.md), [docs/20_PHASE6_RELEASE.md](docs/20_PHASE6_RELEASE.md), and [docs/21_PHASE7_GENERALIZATION_AND_UX.md](docs/21_PHASE7_GENERALIZATION_AND_UX.md). Phase 7 checks pass: TypeScript, 60 automated tests, ESLint, and the production build. Browser viewport, device, and assistive-technology checks still need manual review.

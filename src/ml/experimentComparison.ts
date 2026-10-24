@@ -26,10 +26,11 @@ export interface ScoredExperiment {
   splitSeed: number;
   pointCount: number;
   trainCount: number;
+  validationCount: number;
   testCount: number;
   training: Evaluation;
-  test: Evaluation;
-  testExamples: Array<Pick<Point, 'id' | 'x' | 'y' | 'label'>>;
+  validation: Evaluation;
+  validationExamples: Array<Pick<Point, 'id' | 'x' | 'y' | 'label'>>;
 }
 
 export interface ExperimentComparison {
@@ -42,6 +43,7 @@ export interface ExperimentComparison {
 function score(configuration: ExperimentConfiguration): ScoredExperiment {
   const splitSeed = configuration.splitSeed ?? 123;
   const split = splitData(configuration.points, splitSeed);
+  if (!split.validationAvailable) throw new Error('At least 10 examples are needed to compare saved settings on a separate validation set.');
   const model = fitClassifier(split.train, configuration.algorithm === 'knn'
     ? { algorithm: 'knn', k: configuration.k }
     : { algorithm: 'decision-tree', maxDepth: configuration.treeDepth ?? 3, minSamplesSplit: configuration.treeMinSamplesSplit ?? 2 });
@@ -55,10 +57,11 @@ function score(configuration: ExperimentConfiguration): ScoredExperiment {
     splitSeed,
     pointCount: configuration.points.length,
     trainCount: split.train.length,
+    validationCount: split.validation.length,
     testCount: split.test.length,
     training: evaluate(split.train, predict),
-    test: evaluate(split.test, predict),
-    testExamples: split.test.map(({ id, x, y, label }) => ({ id, x, y, label })),
+    validation: evaluate(split.validation, predict),
+    validationExamples: split.validation.map(({ id, x, y, label }) => ({ id, x, y, label })),
   };
 }
 
@@ -69,8 +72,8 @@ function signature(points: Point[]) {
 export function compareExperiments(current: ExperimentConfiguration, saved: ExperimentConfiguration): ExperimentComparison {
   const currentScored = score(current);
   const savedScored = score(saved);
-  const currentTests = JSON.stringify(currentScored.testExamples);
-  const savedTests = JSON.stringify(savedScored.testExamples);
+  const currentTests = JSON.stringify(currentScored.validationExamples);
+  const savedTests = JSON.stringify(savedScored.validationExamples);
   return {
     sameDataset: current.preset === saved.preset && signature(current.points) === signature(saved.points),
     sameEvaluationExamples: currentTests === savedTests && currentScored.splitSeed === savedScored.splitSeed,

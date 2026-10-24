@@ -11,6 +11,23 @@ describe('k-NN', () => {
   it('orders equal-distance neighbors by ID for deterministic tie-breaking', () => { const tied: Point[] = [{ id: 'b', x: .4, y: .5, label: 'B' }, { id: 'a', x: .6, y: .5, label: 'A' }]; const first = predictKnn({ x: .5, y: .5 }, tied, 1); expect(first.neighbors[0]!.point.id).toBe('a'); expect(first.label).toBe('A'); expect(predictKnn({ x: .5, y: .5 }, tied, 1)).toEqual(first); });
   it('rejects invalid k and empty training data', () => { expect(() => predictKnn({ x: 0, y: 0 }, points, 3)).toThrow(); expect(() => predictKnn({ x: 0, y: 0 }, [], 1)).toThrow(); });
   it('makes deterministic datasets and disjoint seeded splits', () => { expect(makeDataset('noisy')).toEqual(makeDataset('noisy')); const a = splitData(makeDataset('separated')); const ids = new Set(a.train.map(p => p.id)); expect(a.test.every(p => !ids.has(p.id))).toBe(true); expect(a).toEqual(splitData(makeDataset('separated'))); });
+  it('creates three disjoint partitions when the dataset is large enough', () => {
+    const split = splitData(makeDataset('separated'));
+    const trainIds = new Set(split.train.map(point => point.id));
+    const validationIds = new Set(split.validation.map(point => point.id));
+    const testIds = new Set(split.test.map(point => point.id));
+    expect(split.validationAvailable).toBe(true);
+    expect([...validationIds].every(id => !trainIds.has(id) && !testIds.has(id))).toBe(true);
+    expect([...testIds].every(id => !trainIds.has(id))).toBe(true);
+    expect(new Set([...trainIds, ...validationIds, ...testIds]).size).toBe(makeDataset('separated').length);
+  });
+  it('uses a disclosed train/test fallback for small datasets', () => {
+    const small = points.concat([{ id: 'c', x: .4, y: .2, label: 'A' }, { id: 'd', x: .8, y: .9, label: 'B' }]);
+    const split = splitData(small);
+    expect(split.validationAvailable).toBe(false);
+    expect(split.validation).toEqual([]);
+    expect(split.train.length + split.test.length).toBe(small.length);
+  });
   it('rejects duplicate IDs and invalid split seeds', () => { expect(() => splitData([{ ...points[0]!, id: 'same' }, { ...points[1]!, id: 'same' }])).toThrow(/unique/); expect(() => splitData(points, -1)).toThrow(/seed/); });
   it('reports actual accuracy and true-row/predicted-column matrix', () => { const result = evaluate(points, p => p.label); expect(result.accuracy).toBe(1); expect(result.matrix).toEqual([[1, 0], [0, 1]]); });
 });

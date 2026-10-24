@@ -8,16 +8,18 @@ export interface CrossModelComparison {
   splitSeed: number;
   trainCount: number;
   testCount: number;
-  left: { configuration: ClassifierConfiguration; training: Evaluation; test: Evaluation };
-  right: { configuration: ClassifierConfiguration; training: Evaluation; test: Evaluation };
+  validationCount: number;
+  left: { configuration: ClassifierConfiguration; training: Evaluation; validation: Evaluation };
+  right: { configuration: ClassifierConfiguration; training: Evaluation; validation: Evaluation };
 }
 
 export function compareModelsOnSharedSplit(points: Point[], left: ClassifierConfiguration, right: ClassifierConfiguration, splitSeed = 123): CrossModelComparison {
   const split = splitData(points, splitSeed);
+  if (!split.validationAvailable) throw new Error('At least 10 examples are needed to compare models on a separate validation set.');
   const score = (configuration: ClassifierConfiguration) => {
     const model = fitClassifier(split.train, configuration);
     const predict = (point: Point) => model.predict(point);
-    return { configuration, training: evaluate(split.train, predict), test: evaluate(split.test, predict) };
+    return { configuration, training: evaluate(split.train, predict), validation: evaluate(split.validation, predict) };
   };
-  return { splitSeed, trainCount: split.train.length, testCount: split.test.length, left: score(left), right: score(right) };
+  return { splitSeed, trainCount: split.train.length, validationCount: split.validation.length, testCount: split.test.length, left: score(left), right: score(right) };
 }

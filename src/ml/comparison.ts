@@ -6,7 +6,7 @@ import type { Evaluation, Label, Point } from './types';
 export interface KnnComparisonResult {
   k: number;
   training: Evaluation;
-  test: Evaluation;
+  validation: Evaluation;
 }
 
 export interface KnnComparison {
@@ -26,11 +26,12 @@ export function compareKnnConfigurations(
   const split = splitData(points, splitSeed);
   const results = kValues.map(k => {
     if (k > split.train.length) throw new Error(`k must not exceed the ${split.train.length} training examples.`);
+    if (!split.validationAvailable) throw new Error('At least 10 examples are needed to compare settings on a separate validation set.');
     const predict = (point: Point): Label => predictKnn(point, split.train, k).label;
     return {
       k,
       training: evaluate(split.train, predict),
-      test: evaluate(split.test, predict),
+      validation: evaluate(split.validation, predict),
     };
   }) as [KnnComparisonResult, KnnComparisonResult];
   return { split, splitSeed, results };
