@@ -5,8 +5,8 @@ import { compareModelsOnSharedSplit } from './crossModelComparison';
 describe('cross algorithm comparison', () => {
   it('uses one held-out set and scores both classifiers on those same examples', () => {
     const result = compareModelsOnSharedSplit(makeDataset('overlap'), { algorithm: 'knn', k: 5 }, { algorithm: 'decision-tree', maxDepth: 3, minSamplesSplit: 2 });
-    expect(result.testCount).toBe(Math.max(1, Math.min(makeDataset('overlap').length - 1, Math.round(makeDataset('overlap').length * .25))));
-    expect(result.left.test.predictions.map(item => item.point.id)).toEqual(result.right.test.predictions.map(item => item.point.id));
+    expect(result.validationCount).toBe(Math.round(makeDataset('overlap').length * .2));
+    expect(result.left.validation.predictions.map(item => item.point.id)).toEqual(result.right.validation.predictions.map(item => item.point.id));
     expect(result.left.training.predictions).toHaveLength(result.trainCount);
     expect(result.right.training.predictions).toHaveLength(result.trainCount);
   });

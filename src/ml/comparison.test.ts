@@ -2,35 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { compareKnnConfigurations } from './comparison';
 import { makeDataset } from './datasets';
 import { evaluate } from './metrics';
-import { splitData } from './split';
 import type { Point } from './types';
 
 describe('k-NN configuration comparison', () => {
-  it('evaluates configurations on the same held-out observations', () => {
+  it('compares configurations on identical validation observations, separate from test', () => {
     const result = compareKnnConfigurations(makeDataset('overlap'), [1, 5]);
-    expect(result.results[0].test.predictions.map(item => item.point.id))
-      .toEqual(result.results[1].test.predictions.map(item => item.point.id));
+    expect(result.results[0].validation.predictions.map(item => item.point.id))
+      .toEqual(result.results[1].validation.predictions.map(item => item.point.id));
     expect(result.results[0].training.predictions.map(item => item.point.id))
       .toEqual(result.results[1].training.predictions.map(item => item.point.id));
+    expect(result.results[0].validation.predictions.map(item => item.point.id)).not.toContain(result.split.test[0]!.id);
   });
 
-  it('can produce different predictions for different k values', () => {
-    const initial: Point[] = Array.from({ length: 6 }, (_, index) => ({ id: `p${index}`, x: .5, y: .5, label: 'A' }));
-    const trainIds = new Set(splitData(initial).train.map(point => point.id));
-    const training: Point[] = [
-      { id: 'a1', x: 0, y: 0, label: 'A' },
-      { id: 'a2', x: .1, y: 0, label: 'A' },
-      { id: 'b1', x: .2, y: 0, label: 'B' },
-      { id: 'a3', x: .8, y: .8, label: 'A' },
-      { id: 'a4', x: .9, y: .8, label: 'A' },
-    ];
-    let trainIndex = 0;
-    const points = initial.map(point => trainIds.has(point.id)
-      ? { ...training[trainIndex++]!, id: point.id }
-      : { ...point, x: .19, y: 0, label: 'B' as const });
-    const result = compareKnnConfigurations(points, [1, 3]);
-    expect(result.results[0].test.predictions[0]!.predicted).toBe('B');
-    expect(result.results[1].test.predictions[0]!.predicted).toBe('A');
+  it('requires enough examples for a separate validation set', () => {
+    const small: Point[] = Array.from({ length: 6 }, (_, index) => ({ id: `p${index}`, x: index / 6, y: .5, label: index < 3 ? 'A' : 'B' }));
+    expect(() => compareKnnConfigurations(small, [1, 3])).toThrow(/10 examples/);
   });
 
   it('reports class metrics as undefined when denominators are empty', () => {

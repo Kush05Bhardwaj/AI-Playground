@@ -7,29 +7,37 @@ describe('AI Playground workspace', () => {
     window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
     render(<App />);
     expect(screen.getByRole('heading', { name: /Train it\. Test it\./i })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
-    expect(screen.getByText(/Model trained on 42 examples/i)).toBeTruthy();
-    expect(screen.getByText(/14 HELD-OUT/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
+    expect(screen.getByText(/Learned from 34 practice examples/i)).toBeTruthy();
+    expect(screen.getByText(/11 VALIDATION/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Evaluate on unseen examples/i })).toBeTruthy();
+    expect(screen.queryByText(/Held-out test score:/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Evaluate on unseen examples/i }));
+    expect(screen.getByText(/Held-out test score: \d+% across 11 examples/i)).toBeTruthy();
   });
 
   it('offers an explicit empty inspector state, then explains a selected point by keyboard', () => {
     window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
     render(<App />);
     expect(screen.getByText(/select a point on the map or in the examples table/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
     const testPoint = screen.getAllByRole('button', { name: /test example/i })[0]!;
     fireEvent.keyDown(testPoint, { key: 'Enter' });
     expect(screen.getByText('Actual class')).toBeTruthy();
-    expect(screen.getByText('Held-out test')).toBeTruthy();
+    expect(screen.getByText('Hidden until final evaluation')).toBeTruthy();
+    expect(screen.getByText('Reserved test')).toBeTruthy();
+    expect(screen.getByText('Not evaluated yet')).toBeTruthy();
     expect(screen.getByText(/Votes: Group A \d+, Group B \d+/)).toBeTruthy();
     expect(screen.getByText(/Vote shares are not calibrated probabilities/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Evaluate on unseen examples/i }));
+    expect(screen.queryByText('Hidden until final evaluation')).toBeNull();
   });
 
   it('compares two k settings on the same held-out set and invalidates changed settings', () => {
     window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: 'Compare settings' }));
-    expect(screen.getByText(/Same split: 42 training and 14 held-out examples/i)).toBeTruthy();
+    expect(screen.getByText(/Shared split: 34 practice, 11 validation, and 11 reserved test examples/i)).toBeTruthy();
     expect(screen.getByRole('article', { name: /Results for k equals 1/i })).toBeTruthy();
     expect(screen.getByRole('article', { name: /Results for k equals 7/i })).toBeTruthy();
     fireEvent.change(screen.getByRole('slider', { name: 'Comparison configuration 2 k' }), { target: { value: '9' } });
@@ -47,8 +55,8 @@ describe('AI Playground workspace', () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: /Save on this device/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Compare current with saved' }));
-    expect(screen.getByText(/The datasets match\. The held-out examples match\./i)).toBeTruthy();
-    expect(screen.getAllByText(/Held-out accuracy/)).toHaveLength(2);
+    expect(screen.getByText(/The datasets match\. The validation examples match\./i)).toBeTruthy();
+    expect(screen.getAllByText(/Validation accuracy/)).toHaveLength(2);
     fireEvent.change(screen.getByRole('slider', { name: 'Number of neighbors k' }), { target: { value: '7' } });
     expect(screen.getByText(/An experiment or setting changed\. Recompute this comparison/i)).toBeTruthy();
   });
@@ -88,7 +96,7 @@ describe('AI Playground workspace', () => {
   it('commits a point drag once and supports undo and redo', () => {
     window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
     const map = screen.getByRole('group', { name: /Interactive feature map/i });
     Object.defineProperty(map, 'getBoundingClientRect', { value: () => ({ left: 0, top: 0, width: 640, height: 430, right: 640, bottom: 430, x: 0, y: 0, toJSON() {} }) });
     const point = screen.getAllByRole('button', { name: /feature 1/i })[0]!;
@@ -107,7 +115,7 @@ describe('AI Playground workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Undo$/i }));
     expect(screen.queryByRole('button', { name: /feature 1 0\.00, feature 2 0\.00/i })).toBeNull();
     expect(screen.getByRole('button', { name: /^Undo$/i }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/14 HELD-OUT/i)).toBeTruthy();
+    expect(screen.getByText(/11 VALIDATION/i)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^Redo$/i }));
     expect(within(screen.getByRole('group', { name: /Interactive feature map/i })).getAllByRole('button', { name: /feature 1 0\.00, feature 2 0\.00/i }).length).toBe(1);
     expect(screen.getByText(/previous results are stale/i)).toBeTruthy();
@@ -135,13 +143,13 @@ describe('AI Playground workspace', () => {
     window.localStorage.clear();
     window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
     fireEvent.click(screen.getByRole('button', { name: /Save on this device/i }));
     fireEvent.change(screen.getByLabelText('DATASET PRESET'), { target: { value: 'noisy' } });
     expect(screen.getByText('72 observations')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Restore saved/i }));
     expect(screen.getByText('56 observations')).toBeTruthy();
-    expect(screen.getByText(/Train the model to see scores/i)).toBeTruthy();
+    expect(screen.getByText(/Teach the model to see practice and validation scores/i)).toBeTruthy();
   });
 
   it('confirms and starts a fresh experiment with empty history and results', () => {
@@ -153,7 +161,7 @@ describe('AI Playground workspace', () => {
     expect(screen.getByText('56 observations')).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Undo$/i }).hasAttribute('disabled')).toBe(true);
     expect((screen.getByRole('slider', { name: /Number of neighbors/i }) as HTMLInputElement).value).toBe('5');
-    expect(screen.getByText(/Train the model to see scores/i)).toBeTruthy();
+    expect(screen.getByText(/Teach the model to see practice and validation scores/i)).toBeTruthy();
     confirm.mockRestore();
   });
 
@@ -162,9 +170,9 @@ describe('AI Playground workspace', () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: 'Learn' }));
     fireEvent.click(screen.getAllByRole('button', { name: /Start activity/i })[0]!);
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
     expect(screen.getByText(/Completion: Train the model and inspect/i)).toBeTruthy();
-    fireEvent.click(screen.getAllByRole('button', { name: /test example/i })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: /validation example/i })[0]!);
     expect(screen.getByText(/Complete · Train the model and inspect/i)).toBeTruthy();
   });
   it('shows first-use onboarding, dismisses it, and lets the learner reopen it', () => {
@@ -185,17 +193,17 @@ describe('AI Playground workspace', () => {
     expect(screen.queryByText(/The model predicted Group/i)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Lock in guess' }));
     expect(screen.getByText(/Guess recorded/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
     expect(screen.getByText(/The model predicted Group [AB]/i)).toBeTruthy();
   });
 
   it('requires another run when the student submits a guess after already seeing a run', () => {
     window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Lock in guess' }));
     expect(screen.queryByText(/The model predicted Group/i)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Train again/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Teach again/i }));
     expect(screen.getByText(/The model predicted Group [AB]/i)).toBeTruthy();
   });
 
@@ -214,8 +222,8 @@ describe('AI Playground workspace', () => {
     const first = render(<App />);
     fireEvent.click(screen.getByRole('button', { name: 'Learn' }));
     fireEvent.click(screen.getAllByRole('button', { name: /Start activity/i })[0]!);
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
-    fireEvent.click(screen.getAllByRole('button', { name: /test example/i })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /validation example/i })[0]!);
     fireEvent.click(screen.getByRole('button', { name: /Save on this device/i }));
     first.unmount();
     render(<App />);
@@ -227,15 +235,15 @@ describe('AI Playground workspace', () => {
     window.localStorage.setItem('ai-playground.onboarding.dismissed.v1', 'true');
     render(<App />);
     fireEvent.change(screen.getByLabelText('ALGORITHM'), { target: { value: 'decision-tree' } });
-    fireEvent.click(screen.getByRole('button', { name: /Train model/i }));
-    expect(screen.getByText(/Model trained on 42 examples/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Teach the model/i }));
+    expect(screen.getByText(/Learned from 34 practice examples/i)).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Decision tree' })).toBeTruthy();
-    fireEvent.click(screen.getAllByRole('button', { name: /test example/i })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: /validation example/i })[0]!);
     expect(screen.getByText(/Selected point's path/i)).toBeTruthy();
     expect(screen.getByText(/Reached leaf:/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Compare on the same split/i }));
-    expect(screen.getByText(/42 training \/ 14 held-out examples for both models/i)).toBeTruthy();
+    expect(screen.getByText(/34 practice \/ 11 validation examples for both models/i)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Maximum depth'), { target: { value: '1' } });
     expect(screen.getByText(/data or settings changed/i)).toBeTruthy();
   });
